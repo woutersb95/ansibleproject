@@ -1,0 +1,68 @@
+---
+- name: Install Telegraf from InfluxData repository
+  hosts: client_vms
+  become: yes
+  tasks:
+    - name: Download InfluxData GPG key
+      shell: "curl -s https://repos.influxdata.com/influxdata-archive.key > influxdata-archive.key"
+      args:
+        chdir: "/tmp"
+    
+    - name: Verify the downloaded key's integrity
+      shell: "echo '943666881a1b8d9b849b74caebf02d3465d6beb716510d86a39f6c8e8dac7515 influxdata-archive.key' | sha256sum -c"
+      args:
+        chdir: "/tmp"
+    
+    - name: Import the GPG key
+      shell: "cat influxdata-archive.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/influxdata-archive.gpg > /dev/null"
+      args:
+        chdir: "/tmp"
+    
+    - name: Add InfluxData repository to sources list
+      shell: "echo 'deb [signed-by=/etc/apt/trusted.gpg.d/influxdata-archive.gpg] https://repos.influxdata.com/debian stable main' | sudo tee /etc/apt/sources.list.d/influxdata.list"
+    
+    - name: Update package list
+      apt:
+        update_cache: yes
+    
+    - name: Install Telegraf
+      apt:
+        name: telegraf
+        state: present
+
+    - name: Configure Telegraf
+      template:
+        src: telegraf.conf.j2
+        dest: /etc/telegraf/telegraf.conf
+        mode: '0644'
+      notify:
+        - restart telegraf
+
+  handlers:
+    - name: restart telegraf
+      service:
+        name: telegraf
+        state: restarted
+      failed_when: false
+      register: telegraf_restart
+
+    - name: Debug Telegraf status if restart fails
+      when: telegraf_restart is failed
+      block:
+        - name: Check telegraf service status
+          shell: systemctl status telegraf.service
+          register: telegraf_status
+          ignore_errors: yes
+
+        - name: Show telegraf service status
+          debug:
+            msg: "{{ telegraf_status.stdout }}"
+
+        - name: Check telegraf service logs
+          shell: journalctl -xeu telegraf.service
+          register: telegraf_logs
+          ignore_errors: yes
+
+        - name: Show telegraf service logs
+          debug:
+            msg: "{{ telegraf_logs.stdout }}"

@@ -1,0 +1,8 @@
+[client_vms]
+clientvm1 ansible_host=10.0.2.11
+
+[all:vars]
+ansible_user=bw
+ansible_become=yes
+ansible_become_method=sudo
+ansible_become_password='ITF'
