@@ -1,0 +1,5 @@
+---
+- import_playbook: install_docker_playbook.yml
+- import_playbook: wait_for_server_playbook.yml
+- import_playbook: install_telegraf_playbook.yml
+- import_playbook: hardening_playbook.yml

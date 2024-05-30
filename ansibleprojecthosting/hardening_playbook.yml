@@ -1,0 +1,97 @@
+---
+# Dit eerste blok geeft een naam aan de playbook, omschrijft welke managed nodes geconfigureerd worden.
+- name: Ubuntu Server Hardening
+  hosts: all
+# Become: yes zorgt ervoor dat ansible de taken gaat uitvoeren als sudo.
+  become: yes
+  tasks:
+# Deze taak beveilt het gedeelde geheugen door het te mounten met opties die uitvoering van bestanden en setuid-toegang voorkomen. 
+# Dit verhindert dat kwaadaardige programma's gebruik kunnen maken van het gedeelde geheugen om ongeautoriseerde code uit te voeren of verhoogde privileges te verkrijgen.   
+    - name: Secure Shared Memory
+      mount:
+        path: /run/shm
+        src: tmpfs
+        fstype: tmpfs
+        opts: defaults,noexec,nosuid
+        state: mounted
+# Deze taak zorgt ervoor dat de bovenstaande beveiligingsinstellingen voor gedeeld geheugen behouden blijven na een herstart door de configuratie toe te voegen aan /etc/fstab.
+# Dit is van belang omdat anders de bovenstaande instellingen teniet gedaan kunnen worden door een herstart
+    - name: Ensure shared memory is mounted correctly on reboot
+      lineinfile:
+        path: /etc/fstab
+        line: "tmpfs /run/shm tmpfs defaults,noexec,nosuid 0 0"
+        state: present
+# Deze taak past de nieuwe mount-opties toe zonder de server te herstarten.
+# Dit zorgt ervoor dat de beveiligingsinstellingen meteen van kracht zijn.
+    - name: Remount /run/shm with new options
+      command: mount -o remount,noexec,nosuid /run/shm
+# Deze taak verwijdert potentieel onveilige en verouderde netwerkdiensten.
+# Dit vermindert het aanvalsoppervlak en vermindert het aantal kwetsbaarheden.
+    - name: Remove insecure services
+      apt:
+        name:
+          - xinetd
+          - nis
+          - yp-tools
+          - tftpd
+          - atftpd
+          - tftpd-hpa
+          - telnetd
+          - rsh-server
+          - rsh-redone-server
+        state: absent
+        purge: yes
+# Deze taak controleert op de aanwezigheidsaccounts met root-privileges die geen root-account zijn.
+# Dit detecteert potentiële beveiligingsrisico's waar kwaadwillenden of misconfiguraties extra root-accounts kunnen introduceren.
+    - name: Check for non-root accounts with UID 0
+      shell: "awk -F: '($3 == 0) {print}' /etc/passwd"
+      register: uid_zero_accounts
+# Deze taak faalt de playbook als er niet-root accounts met UID 0 gevonden worden en rapporteert deze.
+# Dit verzekert dat dergelijke risico's snel worden opgemerkt en aangepakt kunnen worden.
+    - name: Fail if non-root accounts with UID 0 are found
+      fail:
+        msg: "Non-root accounts with UID 0 found: {{ uid_zero_accounts.stdout }}"
+      when: uid_zero_accounts.stdout_lines | length > 1
+# Deze taak past de SSH-configuratie aan om root-login via SSH te verbieden
+# Dit verhoogt de beveiligng door te voorkomen dat aanvallers rechtstreeks met het root-account kunnen inloggen, wat de impact van een brute-force vermindert.
+    - name: Disable root SSH login
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin no'
+        state: present
+        create: yes
+        backup: yes
+        validate: 'sshd -t -f %s'
+# Deze taak herstart de SSH-dienst om de nieuwe configuratie-instellingen toe te passen.
+# Dit zorgt ervoor dat de wijzigingen in de SSH-configuratie meteen van kracht zijn.
+    - name: Restart SSH service
+      service:
+        name: ssh
+        state: restarted
+# Deze taak installeert fail2ban, een hulpprogramma dat inbraakpogingen voorkomt door IP-blokkering.
+# Dit beschermt de server tegen brute force aanvallen op verschillendediesnten, inclusief SSH.
+    - name: Install fail2ban
+      apt:
+        name: fail2ban
+        state: present
+# Deze taak configureert fail2ban om specifiek SSH-aanvallen te monitoren en te beperken.
+# Dit verbetert de bescherming tegen brute-force aanvallen op de SSH-dienst door verdachte IP-adressen na meerder mislukte inlogpogingen te blokkeren.
+    - name: Configure fail2ban for SSH
+      copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [sshd]
+          enabled = true
+          port = 22
+          filter = sshd
+          logpath = /var/log/auth.log
+          maxretry = 5
+# Deze taak herstart de fail2ban-dienst om de nieuwe configuratie-instellingen toe te passen.
+# Dit zorgt ervoor dat de nieuwe fail2ban istellingen meteen actief worden en de server beschermen.
+    - name: Restart fail2ban service
+      service:
+        name: fail2ban
+        state: restarted
+
+...
